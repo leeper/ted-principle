@@ -2,27 +2,26 @@
 title: "Tidy Experimental Data: The TED Principle"
 author: Thomas J. leeper
 date: 05 February 2017
-output: pdf_document
 ---
 
 Experiments are on the rise. Widely seen as a useful method to test causal hypotheses, randomized experiments (or "RCTs") have become a major tool in the social scientist's toolkit. A key advantage of experimentation is that the method relies heavily on design to justify the assumptions needed to draw causal inferences. Analysis of experimental data is thus remarkably simple: the causal quantity of interest is often a population-level or sample-level average treatment effect, which is easily and directly estimated via a mean-difference comparison of outcomes across treatment conditions. Explaining these methods to students is therefore incredibly simple: the common tools of statistical analysis (e.g., t-tests, ordinary least squares regression, etc.) readily and directly provide appropriate estimators for these quantities. In teaching experimental methods, however, I have frequently found a gap in pedagogical material between the analysis of an idealized experiment and the form of data that experiments, especially survey experiments, typically generate. This article provides an application of "tidy data" principles (Wickham 2014) to experimental data, referred to as the TED principle. The article then shows examples in R and Stata of the common computational expressions needed to produce a tidy experimental dataset.
 
 ## Tidy Experimental Data
 
-Wickham (2014) writes that "tidy datasets are all alike but every messy dataset is messy in its own way". The point is that most computational analyses require a particular kind of data structure - a tidy, rectangular dataset where rows are observations and columns are variables - which rarely if ever is immediately available. Much of a data analyst's efforts are therefore expended in the preprocessing stages of analysis, converting an *untidy* dataset into a *tidy* one. A tidy experimental dataset (TED) is a specific type of tidy dataset that has at a minimum two variables with (possibly missing) values for each experimental unit:
+Wickham (2014) writes that "tidy datasets are all alike but every messy dataset is messy in its own way". The point is that most computational analyses require a particular kind of data structure - a tidy, rectangular dataset where rows are observations and columns are variables - which rarely if ever is immediately available. Much of a data analyst's efforts are therefore expended in the preprocessing stages of analysis, converting an *untidy* dataset into a *tidy* one. A tidy experimental dataset (TED) is a specific type of tidy dataset that has at a minimum two variables with values for each experimental unit:
 
- 1. A numeric variable specifying the unit's experimental condition
+ 1. One factor variable per experimental factor, specifying each unit's factor level
  
- 2. A numeric variable specifying the unit's outcome value
+ 2. One numeric variable per outcome measure, specifying each unit's outcome value
 
-All other experimental datasets are elaborations upon this structure that reflect complications of the design. Before any analysis can proceed, an experimental dataset must have the form of a TED. Table \ref{tab:ted} below shows a simple example of a TED for a two-condition experiment with a binary outcome:
+The most basic design contains two columns: one factor variable representing "treatmnet" versus "control" experimental condition and one numeric variable representing a single outcome. All other experimental datasets are elaborations upon this structure that reflect complexities of the design (e.g., factorial designs, multiple outcomes, missing data, covariates, etc.). The TED principle dictates that analysis of an experiment must begin with the creation of a TED. Table \ref{tab:ted} below shows a simple example of a TED for a two-condition experiment with a binary outcome:
 
 ```{r ted, echo = FALSE}
-data.frame(condition = c(0,0,0,1,1,1),
+data.frame(condition = factor(c(0,0,0,1,1,1)),
            outcome = c(1,0,0,1,1,1))
 ```
 
-(While this example shows the data sorted by treatment condition, the observations in a TED need not be in any particular order.) The TED is the appropriate structure for analyzing experimental data because it allows for any kind of analysis without further transformation. For example, the common tools of t-tests or regression (or ANOVA) can directly be applied to this structure. For example, in R:
+(While this example shows the data sorted by treatment condition, the observations in a TED need not be in any particular order - indeed, row order should not convey any information.) The TED is the appropriate structure for analyzing experimental data because it allows for any kind of analysis without further transformation. For example, the common tools of t-tests or regression (or ANOVA) can directly be applied to this structure. For example, in R:
 
 ```R
 t.test(outcome ~ condition, data = dat)
@@ -33,19 +32,89 @@ summary(aov(outcome ~ condition, data = dat))
 and in Stata:
 
 ```stata
-ttest outcome condition
-reg outcome condition
-oneway outcome condition
+ttest outcome i.condition
+reg outcome i.condition
+oneway outcome i.condition
 ```
 
-But is a TED the form that experimental researh tends to generate? I believe - based upon working with "other peoples' data" as well as my own - that experiments rarely naturally generate a TED. Instead, experimental datasets tend numerous complexities that must be cleaned up, removed, added, merged, or transformed to produce a TED. While these actions are not complex, new and even experienced researchers may not realize the need to create a TED and they may engage in data transformation tasks that move them further away from rather than closer to a TED. The following sections describe several common use cases.
+But is a TED the form that experimental researh tends to generate? I believe - based upon working with ["other peoples' data"](https://twitter.com/search?q=%23otherpeoplesdata&src=typd) as well as my own - that experiments rarely naturally generate a TED. Instead, experimental datasets tend to feature numerous complexities that must be cleaned up, removed, added, merged, or transformed to produce a TED. While these actions are not complex, new and even experienced researchers may not realize the need to create a TED and they may engage in data transformation tasks that move them further away from rather than closer to a TED. The following sections describe several common use cases.
 
 ## Covariates
 
 What role do (pretreatment covariates have in a TED? If we are confident in the physical randomization process and the experimental design is fully randomized (without any blocking factors), then the covariate data play no essential role in the experimental analysis. A TED does not necessarily include any covariate information. It can, but it is not required.
 
+An exception to this is when an experiment is block randomized with respect to one or more covariates. Without getting into the details of why one might rely on block (stratified) randomization (i.e., balance and statistical power), blocking factors may need to be part of a TED. Consider for example the following pre-experimental dataset, containing 16 individuals with varying sex, high school degree, and immigration values:
 
-## Treatment vectors stored as character
+```{r blocking, echo = FALSE}
+dat <- 
+data.frame(sex = rep(c(0,1), each = 8),
+           degree = rep(rep(c(0, 1), each = 4), 2),
+           immigrant = rep(rep(c(0,1), length.out = 8), each = 2))
+dat
+```
+
+If these covariates are used to construct a blocking factor, then the single 8-level blocking factor variable contains all design-relevant information about these covariates:
+
+```{r blocking2, echo = TRUE}
+dat$block <- interaction(dat)
+dat
+```
+
+The resulting three-column TED will thus contain the `block` variable, treatment assignment variable, and outcome variable. The covariates themselves contain no additional information.
+
+Yet in this example design even the blocking factor is unnecessary. Why? Whether the blocking variable is needed depends on how large the blocks are: i.e., do all blocks contain the same number of treatment units and do all blocks contain the same number of control units? If all blocks are the same size, then the experiment can be analyzed as if it were fully randomized but the design ensures covariate balance with respect to all covariates used to create the blocks. If some blocks were larger or smaller, or they contained uneven numbers of treatment and control units, then analysis would need to be performed in a block-specific manner (estimating the conditional average treatment effect in each block and taking a weighted average of block-specific CATEs to estimate the SATE).
+
+## Multiple outcomes per unit
+
+Most experiments have more than one outcome measure. Provided these are distinct measures, then the TED for a multiple-outcome experiment is a simple extension wherein each outcome is represented as an additional column variable. Analysis can proceed on the dataset as is.
+
+When multiple outcomes represent repeated measures (such as in a panel/longitudinal design or a vignette study where each respondent is exposed to multiple treatments) but treatment is time-constant, the TED again simply contains one column per outcome variable.
+
+If treatment is not time-constant (i.e., treatment status changes across time for each unit), the TED must contain unit-time observations in each row and outcome measures for different time periods should be represented as a single column, thus necessitating two additional columns in the TED:
+
+ 1. A factor variable representing a unit-specific identifier
+ 
+ 2. A numeric time indicator capturing the order in which outcomes were measured
+ 
+For those familiar with panel data analysis, this TED is simply the "long" representation of a longitudinal dataset.
+
+This same structure is needed when analyzing a "conjoint" or vignette-based factorial experiment. Such designs involve multiple measures per respondent, wherein the minimal TED contains:
+
+ 1. A factor variable representing a unit-specific identifier
+ 
+ 2. A numeric time indicator capturing the order of vignettes per respondent
+ 
+ 3. Factor variables representing each vignette's experimental attributes
+ 
+ 4. A single numeric outcome variable measuring the response to each vignette.
+ 
+Analysis of such designs proceeds as in a traditional factorial experiment, with the possible addition of unit fixed effects, clustering by respondent, and control for profile order. In R:
+
+```R
+m <- lm(outcome ~ factor1*factor2*factor3 + respondent + factor(order), data = dat)
+margins(m)
+```
+
+```Stata
+reg outcome i.factor1##i.factor2##i.factor3 respondent i.order
+margins, dydx(factor1 factor2 factor3)
+```
+
+## Within-subjects experiments
+
+
+
+## Weights
+
+ * panel datasets and conjoints
+ * weights (sampling, clustering, etc.)
+
+
+## Practicalities of Creating a TED
+
+With the key ideas of the TED principle in mind, this section addresses how to assemble a TED from a variety of common 
+ 
+### Treatment vectors stored as character
 
 A practicality of experimental data entry is that treatment condition is often recorded as a character string, such as `"treatment"` versus `"control"`. The treatment variable in a TED is numeric. This may seem inconsequential, particular for users of R, but character variables cannot be used in regression analysis in Stata, and requires a variable class coercion to avoid an error:
 
@@ -64,7 +133,7 @@ summary(lm(outcome ~ condition, data = dat))
 ```
 
 
-## Factorial designs
+### Factorial designs
 
 Factorial experiments present an unavoidable complexity: the design contains multiple factors and thus the form of analysis of the experiment depends to a large extent on what quantities of interest the researcher desires to know. Consider, for example, a 2x2x2 factorial (a three-factor experiment, where each factor contains two levels constituting a total of 8 experimental conditions). This design can be represented as one of two different TEDs:
 
@@ -94,7 +163,7 @@ reg outcome i.factor1##i.factor2##i.factor3
 margins, dydx(*)
 ```
 
-## Separated outcomes without a treatment vector
+### Separated outcomes without a treatment vector
 
 Not all experimental data generating processes produce a treatment vector. And, of course, it is even possible to analyze experimental data represented in a form other than a TED, such as a structure with separated outcome measures for each experimental condition (with or without a treatment group indicator) and considerable missing data:
 
@@ -138,7 +207,7 @@ replace outcome = outcome1 if outcome1 != .
 
 The result is a TED. The original variables in these case are preserved but no longer needed.
 
-## Merged outcomes where treatment is recorded as an order
+### Merged outcomes where treatment is recorded as an order
 
 Survey experiments sometimes involve question *order* manipulations, where all respondents are exposed to all parts of a questionnaire but in a randomly manipulated order. Such designs generate data structures with limited missing data, but order of presentation information (i.e., the experimental conditions) are stored as an "order" variable. A common order variable will be a character variable containing delimited names or numbers of questions, such as: `1,3,2`, `q1,q3,q2`, `q1|q3|q2`, etc. Assuming question order is stored as `q1|q2|q3` (and there is a good reason to rely on this because other delimiters such as `,` or `;` or a tab are likely to generate conflicts with variable-separators in a delimited data file), then the procedure to transform these into a TED is straightforward. The simplest is a case where each possible unique value of the order variable is a treatment condition, such that it can be directly used as a treatment vector:
 
@@ -163,31 +232,12 @@ dat <- cbind(dat, orders)
 split order, parse(|)
 ```
 
-## One dataset per condition
+### One dataset per condition
 
 Some experiments, such as laboratory or field experiments where units are cluster randomized (i.e., all participants in a given session or at a given site are assigned to the same condition), can tend to generate multiple datasets that must be merged. To produce a TED from these mulltiple files requires either a merge operation followed by tidying or tidying followed by merging. I prefer the latter approach because it creates a simplified dataset that is likely to be more easily merged.
 
-## Multiple outcomes per unit
 
-Most experiments have more than one outcome measure. Provided these are distinct measures, then the TED for a multiple-outcome experiment is a simple extension wherein each outcome is represented as an additional column. Analysis can proceed on the dataset as is.
+## Conclusion
 
-When multiple outcomes represent repeated measures (such as in a panel/longitudinal design or a vignette study where each respondent is exposed to multiple treatments), the TED must include two additional variables:
-
- 1. A respondent indicator
- 
- 2. A "time" indicator capturing the order in which outcomes were measured.
- 
-For those familiar with panel data analysis, this TED is simply the "long" representation of the dataset.
-
-
-## Within-subjects experiments
-
-
-
-## Weights
-
- * panel datasets and conjoints
- * weights (sampling, clustering, etc.)
-
-## Blocked designs
+This article laid out the TED principle - "that analysis of an experiment must begin with the creation of a TED" - and showed how to generate a TED for a number of common experimental designs, including the practicalities of generating the relevant TED variables from common representations of designs and outcomes. Of course there will inevitably be an experiment that includes complexities not covered by these examples, but the essence of the TED principle which says that data munging must precede experimental analysis should serve as some useful guidance.
 
